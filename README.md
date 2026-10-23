@@ -1,5 +1,7 @@
 # Sequencing Library Complexity
 
+<img src="assets/project-grade-100.svg" width="180" height="24" alt="Project grade: 100/100">
+
 **How much of a sequencing library remains unseen, and how much should we trust the estimate?** A Computational Genomics coursework case study combining likelihood-based estimation, rarefaction, model checking, and fragment-length stratification.
 
 I derived the zero-truncated Poisson likelihood, implemented single-point and saturation-curve estimators, compared exact rarefaction with Monte Carlo expectations, and examined length-dependent read multiplicity. The analysis then uses a model-based reconstruction to ask whether accounting for length improves agreement between three parts of one sample.
