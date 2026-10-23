@@ -1,0 +1,692 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, urlcolor=blue!45!black, linkcolor=blue!45!black}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\Pois}{\mathrm{Poisson}}
+\newcommand{\Bin}{\mathrm{Binomial}}
+\newcommand{\Mult}{\mathrm{Multinomial}}
+\newcommand{\hlam}{\hat{\lambda}}
+\newcommand{\hM}{\hat{M}}
+\newcommand{\obs}{\mathrm{obs}}
+\newcommand{\expc}{\mathrm{exp}}
+
+\title{\vspace{-2em}\textbf{Statistical tests used in Ex2}\\[0.3em]\large
+Pearson $\chi^{2}$, Wilks' theorem, and the per-bin LRT\\[0.6em]
+\normalsize \textit{Supplementary material to Computational Genomics, Exercise 2 (Library Complexity)}}
+\author{Roee Tekoah \\ \texttt{roee.tekoah@mail.huji.ac.il}}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\section*{Scope}
+A self-contained primer for the three tests used in Ex2: Pearson's
+chi-squared goodness-of-fit (Q2(b)), Wilks' correction for parameters fit from
+the data (Q2(b) and Q3(b)), and the likelihood-ratio test (LRT) for shared
+$\lambda$ across files (Q3(b)). The three rest on the same large-sample
+machinery; we develop it once and apply it to each.
+
+\tableofcontents
+
+\section{Pearson's $\chi^{2}$ goodness-of-fit}
+
+\subsection{The setting and the statistic}
+
+We have an empirical histogram on $K$ cells, with counts $\obs[k]$ for
+$k = 1, \dots, K$ summing to $U$ total observations. A parametric model with
+parameter $\theta$ assigns each cell a probability $\pi_k(\theta)$ with
+$\sum_k \pi_k(\theta) = 1$. The model-predicted count in cell $k$ is
+\[
+   \expc[k] \;=\; U\,\pi_k(\hat\theta),
+\]
+where $\hat\theta$ is an estimator of $\theta$ (typically MLE).
+
+The question is: could the observed counts have come from the model, up to
+sampling noise? Pearson's test statistic is
+\[
+   \chi^{2}_{\text{Pearson}}
+   \;=\; \sum_{k=1}^{K} \frac{\bigl(\obs[k] - \expc[k]\bigr)^{2}}{\expc[k]}.
+\]
+Two natural questions: why is the denominator $\expc[k]$, and what
+distribution does the statistic follow under the null hypothesis that the
+model is correct? Answering them takes the next three subsections.
+
+\subsection{Multinomial recap: the count vector and its covariance}
+
+If you remember the multinomial distribution cold, skim this. Otherwise, the
+right starting point is to remember that the counts vector is multinomial
+and understand its covariance structure -- both the denominator $\expc[k]$
+and the eventual degrees-of-freedom $K - 1 - p$ come from there.
+
+\paragraph{Binomial first.}
+$X \sim \Bin(U, p)$ counts successes in $U$ independent yes/no trials with
+success probability $p$. Then $\E[X] = Up$ and $\Var(X) = Up(1-p)$.
+
+\paragraph{Multinomial: $K$ categories at once.}
+Each trial now picks one of $K$ categories with probabilities
+$\pi_1, \dots, \pi_K$ (summing to $1$). The count vector
+$(X_1, \dots, X_K) \sim \Mult(U;\, \pi_1, \dots, \pi_K)$ records how many
+trials fell in each. Means:
+\[
+   \E[X_k] \;=\; U\pi_k \;=\; \expc[k].
+\]
+Each individual coordinate is binomial -- for any one trial, it either lands
+in category $k$ or it doesn't -- so $X_k \sim \Bin(U, \pi_k)$ and
+\[
+   \Var(X_k) \;=\; U\pi_k(1 - \pi_k).
+\]
+This already explains the variance bit of the Pearson denominator: in the
+``Poisson regime'' where $\pi_k$ is small, $(1-\pi_k) \approx 1$ and the
+variance simplifies to $U\pi_k = \expc[k]$. So $\sqrt{\expc[k]}$ is the
+standard deviation of a typical cell count, and $\sqrt{\expc[k]}$ is the
+natural scale to measure deviations against. We use this below.
+
+\paragraph{The bins are not independent.}
+The constraint $X_1 + X_2 + \dots + X_K = U$ holds exactly: each trial is
+counted by exactly one $X_k$. If one bin happens to overshoot, the others
+must undershoot to keep the sum equal to $U$. Concretely the counts are
+negatively correlated:
+\[
+   \Cov(X_k, X_\ell)
+   \;=\; \begin{cases}
+            U\pi_k(1-\pi_k) & k = \ell \\
+            -U\pi_k\pi_\ell & k \neq \ell
+         \end{cases}.
+\]
+A quick numeric example: $U = 100$, $\pi = (0.2, 0.5, 0.3)$ gives expected
+counts $(20, 50, 30)$, diagonal variances $(16, 25, 21)$, and off-diagonal
+covariances $-10, -6, -15$. The covariance matrix is
+\[
+   \Sigma \;=\; \begin{pmatrix}
+       16 & -10 & -6 \\
+      -10 &  25 & -15 \\
+       -6 & -15 & 21
+   \end{pmatrix},
+\]
+and \emph{every row sums to zero}: $16 - 10 - 6 = 0$, $-10 + 25 - 15 = 0$,
+$-6 - 15 + 21 = 0$. That is not a coincidence -- $\Sigma$ is singular with
+the all-ones vector in its null space, because there is no randomness in the
+direction that moves the total $U$ (the total is fixed by definition). The
+deviation vector $d_k = \obs[k] - \expc[k]$ inherits the same constraint:
+$\sum_k d_k = 0$. We keep this in mind for the degrees-of-freedom argument
+later.
+
+\subsection{Why the denominator is $\expc[k]$: variance, Poisson limit, $z$-score}
+
+A single per-cell term in Pearson's statistic, written as
+\[
+   \frac{(\obs[k] - \expc[k])^2}{\expc[k]}
+   \;=\; \left( \frac{\obs[k] - \expc[k]}{\sqrt{\expc[k]}} \right)^{\!2}
+   \;=\; z_k^2,
+\]
+is just a squared $z$-score: how many standard deviations $\obs[k]$ is from
+its expected value. Three pieces back this up:
+
+\paragraph{(1) Variance of $\obs[k]$ from Bernoulli arithmetic.}
+Decompose $\obs[k]$ as a sum of indicators: define
+$X_i = 1$ if marble $i$ lands in cell $k$, $0$ otherwise, so each
+$X_i \sim \mathrm{Bernoulli}(\pi_k)$ and $\obs[k] = X_1 + \dots + X_U$.
+Since $X_i \in \{0,1\}$ we have $X_i^2 = X_i$, hence
+\[
+   \E[X_i] = \pi_k,
+   \qquad
+   \Var(X_i) = \E[X_i^2] - \E[X_i]^2 = \pi_k - \pi_k^2 = \pi_k(1-\pi_k).
+\]
+Independence gives $\Var(\obs[k]) = \sum_i \Var(X_i) = U\pi_k(1-\pi_k)$.
+(Intuition: if $\pi_k \in \{0, 1\}$ there's no randomness; variance peaks at
+$\pi_k = 1/2$ where each marble is most uncertain.)
+
+\paragraph{(2) Poisson regime: variance $\approx$ mean.}
+When $\pi_k$ is small (each cell gets a small share of the marbles),
+$1 - \pi_k \approx 1$, so $\Var(\obs[k]) \approx U\pi_k = \expc[k]$. This is
+the Poisson limit: as $U \to \infty$ and $\pi_k \to 0$ with $U\pi_k = \lambda$
+fixed, $\Bin(U,\pi_k) \to \Pois(\lambda)$, and Poisson distributions always
+satisfy $\mathrm{mean} = \mathrm{variance}$.
+
+\paragraph{(3) Standardising gives $N(0,1)$.}
+The CLT says a sum of many independent small effects looks Gaussian. So for
+$U$ large,
+\[
+   \obs[k] \;\approx\; N\bigl(\expc[k],\; \expc[k]\bigr).
+\]
+Standardising any $N(\mu, \sigma^2)$ produces a standard normal: if
+$X \sim N(\mu,\sigma^2)$, then $Z = (X-\mu)/\sigma \sim N(0,1)$. Plugging
+$\mu = \expc[k]$ and $\sigma = \sqrt{\expc[k]}$:
+\[
+   z_k \;=\; \frac{\obs[k] - \expc[k]}{\sqrt{\expc[k]}}
+   \;\approx\; N(0,1).
+\]
+So each Pearson per-cell term is exactly the squared $z$-score of one bin,
+and the full statistic is $\sum_k z_k^2$.
+
+\subsection{The null distribution: $\chi^{2}(K - 1 - p)$}
+
+We now know $\chi^{2}_{\text{Pearson}} = \sum_k z_k^2$ with each
+$z_k \approx N(0,1)$ under $H_0$. The remaining question is which $\chi^{2}$
+distribution that sum follows.
+
+\paragraph{What $\chi^{2}(d)$ even means.}
+The chi-squared distribution with $d$ degrees of freedom is, \emph{by
+definition}, the distribution of $Z_1^2 + Z_2^2 + \dots + Z_d^2$ where the
+$Z_i$ are \emph{independent} standard normals. So $d$ counts the number of
+independent standard-normal pieces inside the sum. ``Degrees of freedom''
+literally means ``how many independent free coordinates of randomness.''
+
+\paragraph{Naive guess vs constraint.}
+We have $K$ approximately-standard-normal $z_k$, so a first guess is
+$\chi^{2}(K)$. But the $z_k$ are not independent. The deviations
+$d_k = \obs[k] - \expc[k]$ already sum to zero, because both $\sum_k \obs[k]$
+and $\sum_k \expc[k]$ equal $U$. Substituting
+$d_k = z_k \sqrt{\expc[k]}$ into that constraint gives one weighted linear
+relation among the $z_k$:
+\[
+   \sum_k z_k\,\sqrt{\expc[k]} \;=\; 0.
+\]
+(It's not $\sum_k z_k = 0$ because each $d_k$ got divided by a different
+$\sqrt{\expc[k]}$.) So the $z_k$ live in a $(K-1)$-dimensional subspace --
+only $K - 1$ of them are ``free,'' and the sum of squares is
+\[
+   \chi^{2}_{\text{Pearson}} \;\sim\; \chi^{2}(K - 1) \quad \text{under } H_0.
+\]
+\emph{Geometric picture.} A point $(x,y,z)$ constrained by $x + y + z = 0$
+still has three coordinates, but only two free directions; $x^2+y^2+z^2$ is
+still a well-defined squared length, but its randomness only fills two
+dimensions. Same story for the $z_k$.
+
+\paragraph{Why the constraint doesn't break the Pearson formula -- the $K=2$ check.}
+The cleanest way to see that the constraint just costs a dof rather than
+mangling the formula is to take $K=2$ explicitly. Then $\obs = (X, U-X)$,
+expected counts $(Up, U(1-p))$, and $d_1 = X - Up$, $d_2 = -d_1$. Pearson:
+\[
+   \chi^{2}_{\text{Pearson}}
+   \;=\; \frac{(X - Up)^2}{Up} + \frac{(X-Up)^2}{U(1-p)}
+   \;=\; (X-Up)^2\!\left(\frac{1}{Up} + \frac{1}{U(1-p)}\right)
+   \;=\; \frac{(X-Up)^2}{Up(1-p)}.
+\]
+That last expression is exactly the squared standard binomial $z$-score,
+which under the CLT is $\chi^{2}(1)$ -- not $\chi^{2}(2)$. The two-bin
+formula collapses to a single squared $z$-score because the two deviations
+are negatives of each other; the constraint shows up cleanly as a dof loss.
+The general $K$ case is the same geometry: the multinomial Gaussian
+approximation lives on a $(K-1)$-dimensional plane, and Pearson's formula is
+the squared length on that plane.
+
+\paragraph{Estimating $p$ parameters costs $p$ more dof.}
+If $\hat\theta$ is MLE-fit from the same data, the fitted model is pulled
+toward the observed counts, shrinking the deviations along $p$ directions in
+the residual space (one direction per free parameter, by the score equation).
+This is Wilks' theorem, formalised in \S\ref{sec:wilks}. The end result:
+\[
+   \chi^{2}_{\text{Pearson}}(\hat\theta) \;\sim\; \chi^{2}(K - 1 - p)
+   \quad \text{under } H_0.
+\]
+where $K$ is the number of cells (after Cochran-merging, below) and $p$ is
+the number of parameters MLE-fit from the data.
+
+\paragraph{What the statistic should look like.}
+
+Saying ``the statistic is $\chi^{2}(K-1-p)$-distributed'' is only useful if
+we know what numbers $\chi^{2}(K-1-p)$ typically produces. Two facts about
+the chi-squared distribution pin it down -- both follow directly from the
+definition $\chi^{2}(r) = Z_1^2 + \dots + Z_r^2$, $Z_i \sim N(0,1)$
+independent.
+
+\emph{Mean.} For a single standard normal $Z$,
+\[
+   \E[Z^2] \;=\; \Var(Z) + (\E[Z])^2 \;=\; 1 + 0 \;=\; 1.
+\]\footnote{The identity $\E[Z^2] = \Var(Z) + (\E[Z])^2$ is the variance
+formula rearranged: $\Var(Z) = \E[(Z-\mu)^2] = \E[Z^2] - 2\mu\E[Z] + \mu^2 =
+\E[Z^2] - \mu^2$ with $\mu = \E[Z]$, so $\E[Z^2] = \Var(Z) + \mu^2$.
+Intuitively: ``average squared value'' = ``spread around the mean'' +
+``mean$^2$ itself''.}
+Sum across $r$ of them and the means add:
+\[
+   \E[\chi^{2}(r)] \;=\; \E[Z_1^2 + \dots + Z_r^2] \;=\; r.
+\]
+So the expected size of a $\chi^{2}(r)$ \emph{is just $r$}.
+
+\emph{Spread.} \textbf{Don't confuse mean and variance here -- they are
+different numbers.} The mean of $\chi^{2}(r)$ is $r$ (what we just showed).
+The \emph{variance} is $2r$, not $r$. By independence of the $Z_i$,
+$\Var(\chi^{2}(r)) = \sum_i \Var(Z_i^2) = 2r$, using the standard-normal
+fact $\Var(Z^2) = 2$.\footnote{For $Z \sim N(0,1)$, $\Var(Z^2) = \E[Z^4] -
+(\E[Z^2])^2 = 3 - 1 = 2$, using the standard-normal fourth moment
+$\E[Z^4] = 3$.} So the standard deviation is $\sqrt{2r}$ and a typical
+$\chi^{2}(r)$ fluctuates by about $\sqrt{2r}$ around its mean $r$.
+
+Plugging $r = K - 1 - p$:
+\[
+   \E[\chi^{2}_{\text{Pearson}}(\hat\theta)] \;\approx\; K - 1 - p,
+   \qquad
+   \text{s.d.} \;\approx\; \sqrt{2(K - 1 - p)}.
+\]
+This pins down what ``small'' means. Under $H_0$ the statistic does
+\emph{not} land near zero -- it lands near $K - 1 - p$, give or take a few
+$\sqrt{2(K-1-p)}$. We reject only when the observed value is many
+$\sqrt{2(K-1-p)}$ away from $K - 1 - p$, i.e.\ when the deviations are
+genuinely bigger than the model's own noise scale. The $p$-value is the
+area of the $\chi^{2}(K-1-p)$ tail above the observed statistic.
+
+\subsection{Cochran's rule -- when the Gaussian approximation breaks}
+
+\paragraph{What Cochran's rule is for.}
+Pearson's statistic is only \emph{approximately} chi-squared. The whole
+construction uses a chain of approximations -- and Cochran's rule polices
+the weakest link. The chain is:
+\[
+   \obs[k] \;\overset{(\mathrm{i})}{\approx}\; \Bin(U, \pi_k)
+           \;\overset{(\mathrm{ii})}{\approx}\; \Pois(\expc[k])
+           \;\overset{(\mathrm{iii})}{\approx}\; N(\expc[k], \expc[k]).
+\]
+Step (i) is the multinomial $\to$ per-cell binomial fact. Step (ii) is
+binomial-to-Poisson, justified when $\pi_k$ is small and $U$ large (which is
+why ``Poisson'' enters the story even though we never modeled the data as
+Poisson). Step (iii) is the CLT, justified when the Poisson \emph{mean}
+$\expc[k]$ is large enough that the distribution looks Gaussian. \textbf{The
+chi-squared story depends on (iii) being decent, and (iii) only holds if
+$\expc[k]$ isn't tiny.}
+
+\paragraph{Why the mean matters: Poisson skewness anchors.}
+A Poisson with small mean is sharply right-skewed and has no business being
+approximated as a symmetric Gaussian:
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item $\expc[k] = 1$: mass $\{0.37, 0.37, 0.18, 0.06, \ldots\}$ on
+       $\{0, 1, 2, 3, \ldots\}$ -- deeply asymmetric.
+\item $\expc[k] = 5$: roughly symmetric around the mean, most mass in $[1, 10]$.
+\item $\expc[k] \geq 10$: Gaussian approximation good enough that the
+       $z$-score story holds quantitatively.
+\end{itemize}
+
+\paragraph{The rule, the fix.}
+Cochran (1954) showed empirically that the $\chi^{2}$ approximation to the
+sampling distribution of Pearson's statistic stays acceptable as long as no
+cell has $\expc[k] < 1$ and no more than $20\%$ of cells have $\expc[k] < 5$.
+The widely-used modern rule of thumb tightens this to
+``$\expc[k] \geq 5$ for every cell'' -- conservative but easy to apply.
+\textbf{5 is not magical}; it's an anchor for the skewness regime above.
+
+When some bins are too sparse -- typically the right tail of a count
+distribution, where the truncated-Poisson decays exponentially -- the fix is
+to merge adjacent low-$\expc$ bins into a single ``tail'' bin until the
+constraint is met. The number of bins \emph{after} merging is the $K$ that
+enters the dof formula $K - 1 - p$.
+
+\subsection{From the general framework to Q2(b): two roles of ``Poisson''}
+
+Everything above is general. Pearson's $\chi^{2}$ works for any categorical
+model: $\pi_1, \dots, \pi_K$ could be fully specified up front (a fair die),
+parametrised by a Poisson rate $\lambda$, a binomial $p$, a geometric, a
+normal with unknown mean and variance, etc. The general dof formula is
+\[
+   \mathrm{df} \;=\; K - 1 - p,
+\]
+where $p$ is the number of model parameters MLE-fit from the same data:
+$p = 0$ for a fully-specified model ($\mathrm{df} = K-1$), $p = 1$ for a
+Poisson with $\hat\lambda$ ($\mathrm{df} = K-2$), $p = 2$ for a normal with
+$\hat\mu, \hat\sigma$ ($\mathrm{df} = K-3$), and so on.
+
+\paragraph{Two appearances of ``Poisson''.}
+In Q2(b) ``Poisson'' shows up in two distinct ways, and it's worth keeping
+them separate:
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item \emph{Noise of a single cell.} The cell count $\obs[k]$ is
+       $\Bin(U, \pi_k) \approx \Pois(\expc[k])$ for small $\pi_k$. This is
+       the bridge used in Cochran's rule -- it says \emph{why} $\expc[k]$
+       must be large for the Gaussian approximation to hold.
+\item \emph{The model being tested.} The data are claimed to come from a
+       (truncated) Poisson with one parameter $\lambda$: each read-count
+       cell $k$ gets probability $\pi_k(\lambda)$. We MLE-fit
+       $\hat\lambda$ from the same data, so $p = 1$ in the dof formula,
+       giving $\mathrm{df} = K - 2$.
+\end{itemize}
+The first is a generic noise approximation that justifies the chi-squared
+machinery in any application; the second is the specific model whose fit
+we're testing. They're related (both involve a Poisson) but they answer
+different questions. The general framework was developed without committing
+to either; the next section formalises what the second one costs in dof.
+
+\section{Wilks' correction for estimated parameters}
+\label{sec:wilks}
+
+\subsection{What changes when the model's parameters are fit from the data}
+
+So far we treated $\pi_k(\theta)$ as fixed by an externally-specified
+$\theta$. In practice we don't know $\theta$ -- we estimate $\hat\theta$ by
+MLE \emph{from the same data} we're testing. That matters, because
+$\hat\theta$ is chosen specifically to make $\expc[k](\hat\theta)$ close to
+$\obs[k]$. The deviations $\obs[k] - \expc[k](\hat\theta)$ are systematically
+smaller than $\obs[k] - \expc[k](\theta_0)$ would be at the true parameter,
+and the Pearson statistic is correspondingly smaller. If we used the
+un-corrected $\chi^{2}(K-1)$ null distribution we would essentially never
+reject the model -- the denominator would be tuned to make the numerator
+look small.
+
+\subsection{The geometric picture}
+
+Think of the observed histogram as a point in $K$-dimensional count space.
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item The total-count constraint $\sum_k \obs[k] = U$ pins it to a
+       $(K-1)$-dimensional surface.
+\item A model with no fitted parameters is a single point on that surface
+       (the predicted histogram). Pearson's statistic is the squared
+       normalised distance from $\obs$ to that point, and the residual fills
+       $K-1$ directions: $\chi^{2}(K-1)$.
+\item A model with $p$ fitted parameters is not a point but a
+       $p$-dimensional curve / surface (one degree of freedom in
+       $\expc(\theta)$ per parameter). MLE picks the closest point on that
+       curve to $\obs$ -- it \emph{projects} the observed histogram onto the
+       model surface. The remaining residual lives in the orthogonal
+       complement, which has $K - 1 - p$ directions.
+\end{itemize}
+Each fitted parameter therefore ``absorbs'' one direction of noise, and the
+remaining squared distance is $\chi^{2}(K - 1 - p)$.
+
+\subsection{Wilks' theorem (1938)}
+
+\textbf{Statement.} If the model has $p$ free parameters
+$\theta = (\theta_1, \dots, \theta_p)$, $\hat\theta$ is the MLE from the same
+data, and the model is correct at some $\theta_0$, then
+\[
+   \chi^{2}_{\text{Pearson}}(\hat\theta)
+   \;\overset{d}{\longrightarrow}\; \chi^{2}(K - 1 - p)
+   \qquad \text{as } U \to \infty.
+\]
+The total degrees-of-freedom accounting is
+\[
+   \mathrm{df} \;=\; (\text{cells after Cochran merging}) - 1
+                 - (\text{\# parameters MLE-fit from the data}).
+\]
+
+\paragraph{Reading this as a question.}
+The test now asks: \emph{after giving the model the unfair advantage of
+picking its best $\hat\theta$, are the remaining deviations still too
+large?} If yes, reject; the data don't fit even when the model is given the
+benefit of the doubt.
+
+\paragraph{Numerical example.}
+With $K = 10$ bins, a model with fully-specified $\pi_k$ has
+$\mathrm{df} = 9$. If the same model has one fitted parameter
+($\pi_k = \pi_k(\lambda)$ with $\hat\lambda$ MLE), $\mathrm{df} = 8$,
+because the fitted $\lambda$ already absorbs one direction of deviation.
+For Q2(b) here we estimate $\lambda$ only, so $p = 1$ and $\mathrm{df} = K - 2$.
+
+\subsection{Practical effect in Q2(b): why $\chi^{2}$ is in the tens of thousands}
+
+After Cochran tail-merging into $K \approx 9$--$13$ non-sparse bins,
+$\mathrm{df} = K - 2 \approx 7$--$11$. Under $H_0$ we expect
+$\chi^{2} \approx K-2$ with sd $\sqrt{2(K-2)} \approx 4$. What we actually
+see on the data is $\chi^{2} \sim 10^{3}$--$10^{4}$ -- three to four orders
+of magnitude beyond the null mean. Two compounding factors explain the gap.
+
+\paragraph{(1) Huge $U$ amplifies tiny relative misses.}
+Each cell contributes
+$z_k^2 = (\obs[k]-\expc[k])^{2}/\expc[k]$. Writing
+$\obs[k] = \expc[k](1 + r_k)$ where $r_k$ is the \emph{relative}
+miss, this becomes $z_k^2 = \expc[k]\,r_k^2$. So absolute squared deviations
+scale linearly with $\expc[k]$. With $U \sim 10^{6}$, a typical bin has
+$\expc[k] \sim 10^{4}$--$10^{5}$, and a modest $10\%$ relative miss already
+contributes $z_k^2 \sim 10^{2}$--$10^{3}$ all by itself. A few cells like
+that and $\chi^{2}$ hits the thousands.
+
+\paragraph{(2) The right tail catastrophically misfits.}
+The truncated-Poisson predicts an exponentially decaying right tail
+($\propto \lambda^{k}/k!$). The actual histograms have a much heavier right
+tail because $\lambda$ is \emph{not} constant across fragments -- some
+amplify a lot ($n_j = 10, 15, 20$), others barely at all ($n_j = 1, 2$).
+A single $\hat\lambda$ averages them and ends up matching neither regime
+well; in particular it predicts $\expc[k]$ at high $k$ that is orders of
+magnitude below what's observed. Cochran-merging collapses those into a
+single ``tail'' bin, but the merged tail still has $\obs \gg \expc$, and
+that one bin alone can contribute $\sim 10^{3}$--$10^{4}$ to the statistic.
+
+\paragraph{Bottom line.}
+$\chi^{2} \sim 10^{4}$ on $\mathrm{df} \sim 10$ is not borderline -- the
+dof correction is irrelevant. The model is rejected by a margin of
+hundreds of standard deviations. The \emph{why} -- heterogeneous
+$\lambda$ across fragments -- is exactly what Q3 unpacks (where $\hlam_\ell$
+is shown to vary by a factor of $\sim 5$--$10$ with fragment length alone).
+
+\section{Likelihood-ratio test (LRT)}
+
+\subsection{What an LRT is, in one paragraph}
+
+The LRT is the same machinery as Pearson, just framed via likelihoods.
+You start with a \emph{restricted} model $H_0$ (lower-dimensional family
+$\Theta_0$, say $p_0$ free parameters) and a \emph{fuller} nested model
+$H_1$ (higher-dimensional family $\Theta_1$, $p_1$ free parameters,
+$p_1 > p_0$). MLE-fit each side; the LRT statistic compares the maximised
+likelihoods:
+\[
+   \Lambda \;=\; \frac{\sup_{\theta \in \Theta_1} L(\theta)}
+                     {\sup_{\theta \in \Theta_0} L(\theta)}
+        \;=\; \frac{L(\hat\theta_1)}{L(\hat\theta_0)},
+   \qquad
+   T \;:=\; 2 \log \Lambda \;\geq\; 0.
+\]
+Because $\Theta_0 \subset \Theta_1$, $H_1$ can never fit worse than $H_0$,
+so $T \geq 0$ always. The question is whether $H_1$ fits \emph{enough}
+better to justify rejecting $H_0$.
+
+\subsection{Null distribution (Wilks)}
+
+Under $H_0$, with mild regularity, Wilks gives
+\[
+   T \;\overset{d}{\longrightarrow}\;
+       \chi^{2}\bigl(p_1 - p_0\bigr) \qquad \text{as } U \to \infty,
+\]
+i.e.\ dof = (free parameters in $H_1$) $-$ (free parameters in $H_0$).
+
+\paragraph{Why $p_1 - p_0$ and not $p_0$ or $p_1$.}
+The LRT does \emph{not} measure ``how noisy $H_0$ is.'' It measures
+\emph{how much better $H_1$ fits than $H_0$} -- a difference of
+log-likelihoods. The bigger model can only improve fit by exercising the
+extra $p_1 - p_0$ parameters that $H_0$ doesn't have. Under $H_0$, that
+improvement is pure overfitting noise filling exactly $p_1 - p_0$
+directions, so $T \sim \chi^{2}(p_1 - p_0)$. The geometry is the same
+projection-residual story as in \S\ref{sec:wilks}, just applied to the
+\emph{gap between two fitted models} instead of \emph{the residual of one
+fitted model against the data}.
+
+A small example to lock it in. Suppose $H_1: X \sim N(\mu, \sigma^2)$
+($p_1 = 2$) and $H_0: X \sim N(0, 1)$ ($p_0 = 0$, both parameters fixed).
+Then $p_1 - p_0 = 2$ and $T \sim \chi^{2}(2)$ -- even though $p_0 = 0$,
+so $\chi^{2}(p_0)$ would be a degenerate point distribution at zero
+(clearly not what's going on). The two free directions in $H_1$ ($\mu$ and
+$\sigma^2$) can each absorb a unit of noise, giving exactly
+two-dimensional overfitting under the null.
+
+\paragraph{Pearson vs LRT, same machinery.}
+Both are special cases of the score / Wald / likelihood-ratio asymptotic
+trinity. They agree under $H_0$ up to $\mathcal{O}_p(U^{-1})$ in finite
+samples. The conceptual distinction is what's being projected onto what:
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item \emph{Pearson} measures the leftover distance from the \emph{fitted
+       model} to the \emph{data}, so $\mathrm{df} = K - 1 - p$ (cells
+       minus constraint minus fitted parameters).
+\item \emph{LRT} measures the distance between the \emph{small fitted
+       model} and the \emph{large fitted model}, so $\mathrm{df} = p_1 - p_0$
+       (extra-parameter count).
+\end{itemize}
+We pick whichever is computationally easier: Pearson for Q2(b) (histogram
+structure), LRT for Q3(b) (rate-parameter nesting across files).
+
+\section{Q3(b) LRT in detail}
+
+\subsection{Exactly what we are testing}
+
+\paragraph{Two indices to keep straight.}
+We use two different letters because they play different roles:
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item $\ell$ -- a \emph{length bin} (e.g.\ $\ell = 150\,\text{bp}$). We run
+       a \emph{separate} LRT at each $\ell$; $\ell$ just identifies which
+       one. It stays fixed throughout one test.
+\item $f$ -- a \emph{file index}, $f = 1, 2, \dots, F$. Within a single test
+       at bin $\ell$, we sum over the $F = 4$ files. So $f$ runs inside the
+       sums; $\ell$ does not.
+\end{itemize}
+$T_\ell$ is the LRT statistic at bin $\ell$; $\sum_{f=1}^{F}$ is the sum
+over files \emph{at} that bin.
+
+\paragraph{Setup.}
+Fix one length bin $\ell$. We have $F$ files; file $f$ contributes
+$(N_{\ell,f}, U_{\ell,f})$. We want to know whether the $F$ files share one
+PCR rate $\lambda$ at this bin, or whether each file has its own rate.
+
+\paragraph{$H_0$ (shared rate).}
+A single $\lambda$ governs all $F$ files: $\lambda_1 = \dots = \lambda_F =
+\lambda$. \textbf{One free parameter}, $p_0 = 1$.
+
+\paragraph{$H_1$ (per-file rate).}
+Each file gets its own $\lambda_f$, no constraint. \textbf{$F$ free
+parameters}, $p_1 = F$.
+
+\paragraph{LRT dof.}
+$p_1 - p_0 = F - 1$. So under $H_0$, $T_\ell \sim \chi^{2}(F - 1)$
+asymptotically. For our four-file case ($F = 4$), $T_\ell \sim \chi^{2}(3)$.
+
+\emph{Common confusion.} The ``$K - 1 - p$'' formula from Pearson does not
+apply here. It came from a histogram with $K$ cells plus the total-count
+constraint. The Q3(b) LRT has a different structure -- $F$ files (not $K$
+cells), no total-count constraint, and the dof is just the extra-parameter
+count $p_1 - p_0 = F - 1$.
+
+\subsection{The log-likelihoods}
+
+The per-file truncated-Poisson log-likelihood at rate $\lambda$, dropping
+$\lambda$-independent constants, is
+\[
+   \log L_f(\lambda) \;=\; -U_{\ell,f}\,\lambda
+                          + N_{\ell,f} \log \lambda
+                          - U_{\ell,f}\log\!\bigl(1 - e^{-\lambda}\bigr).
+\]
+
+\subsection{Computing the two MLEs}
+
+\textbf{$H_1$: fit each file separately.} Each file solves Q1's MLE equation
+$\lambda/(1 - e^{-\lambda}) = N_{\ell,f}/U_{\ell,f}$ by \texttt{brentq},
+giving $\hat\lambda_f$. The total $H_1$ log-likelihood at this bin is
+$\sum_{f=1}^{F} \log L_f(\hat\lambda_f)$.
+
+\textbf{$H_0$: fit one $\lambda$ to the pooled data.} Under $H_0$ all files
+share $\lambda$, so the joint MLE solves the Q1 equation on the pooled
+sums:\footnote{\emph{Why does $p_0 = 1$, even though the sufficient
+statistic per file is the two numbers $(N_f, U_f)$?} Because Wilks counts
+\emph{model parameters}, not data dimensions. The model has one rate
+parameter ($\lambda$). The sufficient statistic $(N_f, U_f)$ is a
+2-dimensional data summary, but $\hat\lambda$ is determined by their
+\emph{ratio} $N_f/U_f$ through the Q1 equation -- one scalar going into the
+MLE on the parameter side, even though two numbers go in on the data side.
+For Wilks: parameter count is what matters, so $p_0 = 1$, $p_1 = F$,
+$\mathrm{dof} = F - 1$.}
+\[
+   \frac{\lambda}{1 - e^{-\lambda}} \;=\; \frac{N_{\text{pool}}}{U_{\text{pool}}},
+   \qquad N_{\text{pool}} \;=\; \sum_f N_{\ell,f},
+   \qquad U_{\text{pool}} \;=\; \sum_f U_{\ell,f}.
+\]
+This gives a single $\hat\lambda_{\text{pool}}$, and the $H_0$
+log-likelihood is $\sum_{f=1}^{F} \log L_f(\hat\lambda_{\text{pool}})$ --
+all $F$ files scored with the same rate.
+
+\subsection{The test statistic and decision rule}
+
+\paragraph{The statistic.}
+\[
+   T_\ell \;=\; 2\Bigl[\, \sum_{f=1}^{F} \log L_f(\hat\lambda_f)
+                       \;-\; \sum_{f=1}^{F} \log L_f(\hat\lambda_{\text{pool}}) \,\Bigr]
+        \;\sim\; \chi^{2}(F - 1) \text{ under } H_0.
+\]
+The bracket is $H_1$'s log-likelihood (each file with its own best rate)
+minus $H_0$'s (each file forced to the pooled rate). $T_\ell \geq 0$ with
+equality exactly when $\hat\lambda_1 = \dots = \hat\lambda_F =
+\hat\lambda_{\text{pool}}$ (the per-file MLEs all happen to coincide with
+the pooled MLE).
+
+\paragraph{What $T_\ell$ should look like under $H_0$.}
+This step mirrors what we did for Pearson in \S 1.4. Reusing the same
+chi-squared facts:
+\[
+   \E[\chi^{2}(F-1)] \;=\; F - 1,
+   \qquad
+   \mathrm{sd}\bigl[\chi^{2}(F-1)\bigr] \;=\; \sqrt{2(F - 1)}.
+\]
+Plugging $F = 4$: under $H_0$ the statistic $T_\ell$ should land near
+\[
+   \mathrm{mean} \;\approx\; F - 1 \;=\; 3,
+   \qquad
+   \mathrm{sd} \;\approx\; \sqrt{2 \cdot 3} \;\approx\; 2.4.
+\]
+So $T_\ell$ in single digits is normal; $T_\ell$ in the dozens is
+borderline; $T_\ell$ in the hundreds means the per-file MLEs disagree by
+much more than the sampling noise of a shared-rate model allows.
+
+\paragraph{Decision rule from the noise scale.}
+The level-$\alpha$ threshold $\chi^{2}_{1-\alpha}(F-1)$ is just the cutoff
+above which only an $\alpha$-fraction of $\chi^{2}(F-1)$ realisations
+land. Pick $\alpha = 0.05$ and $F-1 = 3$: $\chi^{2}_{0.95}(3) \approx 7.81$,
+so we reject whenever $T_\ell > 7.81$ (about $3.4$ sd's above the null
+mean). Equivalently, work with the $p$-value:
+\[
+   \boxed{\;
+     \text{Reject } H_0 \iff T_\ell > \chi^{2}_{1-\alpha}(F-1)
+     \iff p_\ell \;=\; \Pr\!\bigl[\chi^{2}(F-1) > T_\ell\bigr] \;<\; \alpha.
+   \;}
+\]
+$p_\ell$ is just the upper-tail mass of $\chi^{2}(F-1)$ beyond the observed
+$T_\ell$ -- the same translation from a test statistic to a $p$-value as
+in Pearson.
+
+\subsection{Practical considerations}
+
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item \textbf{Per-bin sample size.} A bin is included only if
+       $U_{\ell,f} \geq 50$ for at least 2 files. Otherwise the per-file
+       MLE is unreliable and the asymptotic $\chi^{2}(F-1)$ approximation
+       breaks down.
+\item \textbf{Statistical vs practical significance.} The LRT detects
+       \emph{any} departure from a shared $\lambda$. With $N_{\ell,f}$ in
+       the tens of thousands per bin, even a $10\%$ shift between files
+       produces a large $T_\ell$. ``Statistically significant'' here is
+       not the same as ``biologically important''; the report flags this.
+\item \textbf{Multiple testing.} With $\sim 90$ length bins tested
+       independently, the family-wise error rate under no correction is
+       essentially $1 - 0.95^{90} \approx 0.99$. We apply both Bonferroni
+       ($\alpha/m_{\text{tests}}$, FWER, conservative) and
+       Benjamini--Hochberg ($p_{(i)} \leq i\alpha/m_{\text{tests}}$ in
+       sorted order, FDR, more powerful). See Lecture~5.
+\end{itemize}
+
+\section{Reading the Q2(b) and Q3(b) results}
+
+\subsection{Q2(b)}
+After Cochran-merging, every file gives $\chi^{2}$ of order $10^{3}$--$10^{4}$
+on $\mathrm{df} \approx 7$--$11$, with $p$-values numerically
+indistinguishable from $0$. \emph{Conclusion:} the global uniform-$\lambda$
+truncated-Poisson model is strongly rejected on every file. The systematic
+$\hM_{\text{MLE}} > \hM_{\text{fit}}$ gap from Q2(a) is the same
+misspecification manifesting in the saturation-curve fit.
+
+\subsection{Q3(b)}
+Of $\sim 91$ length bins, $86$ ($\sim 95\%$) reject the shared-$\lambda$ null
+at $\alpha = 0.05$ (raw $p$), $86$ ($\sim 95\%$) at BH-FDR $q < 0.05$, and
+$78$ ($\sim 86\%$) at Bonferroni $\alpha/91 \approx 5.5 \times 10^{-4}$. The
+$78$ ($\sim 86\%$) at Bonferroni $\alpha/91 \approx 5.5 \times 10^{-4}$. The
+$p$-value distribution is sharply bimodal -- bins either reject decisively
+or not at all -- so the three corrections give nearly identical counts.
+Rejections are dominated by Sample~2 vs the Sample~1 parts (the cross-file
+amplitude shift visible in the $\lambda$ vs.\ length plot).
+
+\subsection{Translating back to the science}
+Both tests confirm that the data are \emph{not} generated by a single
+truncated-Poisson with one $\lambda$. The per-bin LRT then localises where
+the heterogeneity lives -- across files at most lengths, indicating real
+
+\end{document}
